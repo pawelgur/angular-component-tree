@@ -13,21 +13,21 @@ const NO_DUPLICATES = true; // will report max 1 instance of each component
 glob("./sources/**/*.html", {}, (er, files) => {
 	for (let file of files) {
 		let contents = fs.readFileSync(file, 'utf8');
-		let document = parse5.parseFragment(contents);
-		let filename = path.basename(file);
+		let document = parse5.parseFragment(contents);	
     
-    let node = transformDocument(document, filename);
+    let node = transformDocument(document, file);
         
     printBranch(node);
 		console.log("");
 	}
 });
 
-function transformDocument(document, filename) {
+function transformDocument(document, file) {
   let existingNodes = [];
   let nodes = transformNode(document, existingNodes);
   let rootNode = nodes[0];
-  rootNode.name = filename;
+  rootNode.name = getComponentName(file);
+  rootNode.path = file;
   return rootNode;
 }
 
@@ -87,4 +87,36 @@ function printBranch(node, separator = "") {
 
 function prettyJSON(obj) {
     console.log(JSON.stringify(obj, null, 2));
+}
+
+function getComponentName(file) {
+  let tsFile = file.replace(".html", ".ts");
+  if (!fs.existsSync(tsFile)) {
+    console.warn("WARNING: ts file not found!", tsFile);
+    return
+  }
+  
+  let re = /@Component\(\{(.+?)\}\)/gms;
+  let contents = fs.readFileSync(tsFile, 'utf8');
+  let match = re.exec(contents);
+  if (noMatch(match)) {
+    return;
+  }
+  
+  re = /selector:\s"(.+?)"/gms;
+  match = re.exec(match[1]);
+  if (noMatch(match)) {
+    return;
+  }
+  
+  return match[1];  
+  
+  function noMatch(match) {
+    if (!match || match.length < 2) {
+      console.warn("WARNING: component name not found!", tsFile);
+      return true;
+    }
+    
+    return false;
+  }
 }
