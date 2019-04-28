@@ -1,141 +1,98 @@
-const parse5 = require('parse5');
-const fs = require('fs');
-const glob = require("glob")
-const path = require('path');
 const _ = require("lodash");
+const argv = require('minimist')(process.argv.slice(2));
 
-const htmlTags = require('html-tags');
-const customTags = ["#text", "#comment", "#document-fragment", "ng-container", "ng-template"];
-const tagsToSkip = [...customTags, ...htmlTags];
+const utils = require("./utils.js");
+const resolver = require("./component-resolver.js");
 
-const NO_DUPLICATES = true; // will report max 1 instance of each component
+const templateSelector = argv.p ? argv.p : "./sources/**/*.html";
+const componentName = argv.c;
+const isDebug = argv.d;
 
 /*
   TODO:
-  1. get dependencies of component X
-  2. find where component X is nested
+  1. show part of graph where component is placed (up to root node, but without details of siblings; also show child graph)
 
+  - scan for ts files and detect components, parse `templateUrl` or `template` to get template
+  - support multiple selector names, directives
  */
 
-glob("./sources/**/*.html", {}, (er, files) => {
-	for (let file of files) {
-		let contents = fs.readFileSync(file, 'utf8');
-		let document = parse5.parseFragment(contents);	
-    
-    console.log("");
-    console.log("info ///////////////");
-    console.log("");
-    let info = getComponentInfo(document, file);
-    printComponentInfo(info);
-    console.log("");
-    
-    console.log("original ///////////////");
-    printOriginalTree(document);
-    console.log("");   
-   
-	}
-});
+main();
 
-function getComponentInfo(templateDocument, file) {
-  const name = getComponentName(file);
+
+function main() {
+  const components = resolver.resolveComponents(templateSelector);
+
+  if (isDebug) {
+    printDebugInfo(components);
+    return;  
+  }
   
-  return {
-    name,
-    path: file,
-    dependencies: findDependencies(templateDocument, [], name)    
-  };
+  if (!componentName) {
+    printComponentTree(components);
+    return;
+  }
+
+  const component = components[componentName];
+  const dependencies = component && component.dependencies;
+  const parents = resolver.resolveParentComponents(componentName, components);
+
+  console.log(componentName);
+  if (dependencies) {
+    console.log("Uses:");
+    prettyJSON(component.dependencies);  
+  } else {
+    console.log("Failed to resolve dependencies: component not found");
+  }
+  
+
+  console.log("");
+  console.log("Used in:");
+  prettyJSON(parents);
 }
 
-function findDependencies(node, dependencies, rootNodeName) {
-  if (!isIgnored(node) && !dependencies.includes(node.nodeName)) {
-    dependencies.push(node.nodeName);
-  }
+
+function printDebugInfo(components) {
+  _.forEach(components, componentInfo => {
+    console.log("");
+    printComponentInfo(componentInfo);
+    console.log("");  
+  });
+}
+
+function printComponentTree(components) {
+  _.forEach(components, component => {
+    printComponent(component, "", components);
+    console.log("");
+  });
+}
+
+function printComponent(component, level = "", components, componentsInBranch = []) {
+  console.log(level, component.name);
   
-  if (node.nodeName === rootNodeName) {
-    // handle circular dependencies
-    return dependencies;
-  }
+  if (componentsInBranch.includes(component.name)) {
+    return;
+  }  
+  componentsInBranch = [...componentsInBranch, component.name]; // create new branch for this level so it will not affect upper levels
   
-  if (hasChildren(node)) {
-    for (let child of node.childNodes) {
-      findDependencies(child, dependencies, rootNodeName);
+  level = level + "-";
+  for (const childKey of component.dependencies) {
+    const child = components[childKey];
+    if (child) {
+      printComponent(child, level, components, componentsInBranch);
+    } else {
+      console.log(level, childKey, "x");
     }
-  }
-  
-  return dependencies;
+  }  
 }
+
 
 function printComponentInfo(info) {
   console.log(info.name);
-  console.log(info.path);
+  console.log(info.componentPath);
+  console.log(info.templatePath);
   for (let dep of info.dependencies) {
     console.log("-", dep);
   }
-}
-
-/*
-function transformDocument(document, file) {
-  let existingNodes = [];
-  let nodes = transformNode(document, existingNodes);
-  let rootNode = nodes[0];
-  rootNode.name = getComponentName(file);
-  rootNode.path = file;
-  return rootNode;
-}
-
-function transformNode(node, existingNodes) {  
-  let children = [];
-  if (hasChildren(node)) {
-    for (let child of node.childNodes) {
-      let childNodes = transformNode(child, existingNodes);
-      children = children.concat(childNodes);
-    }
-  }  
-  
-  if (isIgnored(node)) {
-    return children;
-  }
-  
-  if (NO_DUPLICATES && existingNodes.includes(node.nodeName)) {
-    return children;
-  }
-  
-  existingNodes.push(node.nodeName);
-  return [{
-    name: node.nodeName,
-    children
-  }];
-}
-
-function printTransformedTree(node, separator = "") {
-  if (_.isArray(node)) {
-    for (let n of node.children) {
-      printTransformedTree(n, separator + "-");
-    }
-    return;
-  }
-  
-  console.log(`${separator} ${node.name}`);
-  
-  for (let child of node.children) {
-    printTransformedTree(child, separator + "-");
-  }
-}
-*/
-
-function hasChildren(node) {
-  return isIterable(node.childNodes) && node.childNodes && node.childNodes.length;
-}
-
-function isIgnored(node) {
-  return tagsToSkip.includes(node.nodeName);
-}
-
-function isIterable(obj) {
-  if (obj === null || obj === undefined) {
-    return false;
-  }
-  return typeof obj[Symbol.iterator] === 'function';
 }
 
 // for debugging, prints real html tree
@@ -144,10 +101,9 @@ function printOriginalTree(node, separator = "") {
   
   if (!skipNodes.includes(node.nodeName)) {
     console.log(`${separator} ${node.nodeName}`);  
-  }
+  }   
    
-   
-  if (hasChildren(node)) {
+  if (utils.hasChildren(node)) {
     for (let child of node.childNodes) {
       printOriginalTree(child, separator + "-");
     }
@@ -156,36 +112,4 @@ function printOriginalTree(node, separator = "") {
 
 function prettyJSON(obj) {
     console.log(JSON.stringify(obj, null, 2));
-}
-
-function getComponentName(file) {
-  let tsFile = file.replace(".html", ".ts");
-  if (!fs.existsSync(tsFile)) {
-    console.warn("WARNING: ts file not found!", tsFile);
-    return
-  }
-  
-  let re = /@Component\(\{(.+?)\}\)/gms;
-  let contents = fs.readFileSync(tsFile, 'utf8');
-  let match = re.exec(contents);
-  if (noMatch(match)) {
-    return;
-  }
-  
-  re = /selector:\s"(.+?)"/gms;
-  match = re.exec(match[1]);
-  if (noMatch(match)) {
-    return;
-  }
-  
-  return match[1];  
-  
-  function noMatch(match) {
-    if (!match || match.length < 2) {
-      console.warn("WARNING: component name not found!", tsFile);
-      return true;
-    }
-    
-    return false;
-  }
 }
