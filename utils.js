@@ -5,7 +5,8 @@ const tagsToSkip = [...customTags, ...htmlTags];
 module.exports = {
   hasChildren, 
   isIgnored,
-  isIterable
+  isIterable,
+  prettyJSON
 };
 
 function hasChildren(node) {
@@ -21,4 +22,8 @@ function isIterable(obj) {
     return false;
   }
   return typeof obj[Symbol.iterator] === 'function';
+}
+
+function prettyJSON(obj) {
+    console.log(JSON.stringify(obj, null, 2));
 }

@@ -22,6 +22,10 @@ function resolveComponents(templateSelector) {
     
     components[info.name] = info;
   }
+  
+  _.forEach(components, component => {
+    component.parents = resolveParentComponents(component.name, components);
+  })
 
   return components;
 }
@@ -29,7 +33,7 @@ function resolveComponents(templateSelector) {
 function resolveParentComponents(componentName, components) {
   const parents = [];
   _.forEach(components, component => {
-    if (component.name !== componentName && component.dependencies.includes(componentName)) {
+    if (component.name !== componentName && component.children.includes(componentName)) {
       parents.push(component.name);
     }
   });
@@ -45,7 +49,8 @@ function getComponentInfo(templateDocument, templateFile) {
     name,
     componentPath: componentFile,
     templatePath: templateFile,
-    dependencies: findDependencies(templateDocument, [], name)    
+    children: findDependencies(templateDocument, [], name) ,
+    parents: []   
   };
 }
 
